@@ -1,6 +1,11 @@
 # All packages required
 CPMAddPackage("gh:fmtlib/fmt#9.1.0")
-CPMAddPackage("gh:nlohmann/json@3.11.2")
+CPMAddPackage(
+  NAME json
+  VERSION 3.11.3
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  OPTIONS "JSON_BuildTests OFF"
+)
 CPMAddPackage("gh:tinyobjloader/tinyobjloader#v2.0.0rc10")
 CPMAddPackage("gh:richgel999/miniz#3.0.2")
 
@@ -13,8 +18,8 @@ CPMAddPackage(
 
 CPMAddPackage(
   NAME tinyexr
-  GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-  GIT_TAG v1.0.2
+  VERSION 1.0.2
+  URL https://github.com/syoyo/tinyexr/archive/refs/tags/v1.0.2.zip
   DOWNLOAD_ONLY YES
 )
 
