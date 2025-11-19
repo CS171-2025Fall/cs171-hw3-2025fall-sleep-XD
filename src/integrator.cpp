@@ -63,66 +63,85 @@ void IntersectionTestIntegrator::render(ref<Camera> camera, ref<Scene> scene) {
         // assert(pixel_sample.y >= dy && pixel_sample.y <= dy + 1);
         // const Vec3f &L = Li(scene, ray, sampler);
         // camera->getFilm()->commitSample(pixel_sample, L);
+        const Vec2f &pixel_sample = sampler.getPixelSample();
+
+        // 2. 根据采样位置生成光线
+        auto ray =
+            camera->generateDifferentialRay(pixel_sample.x, pixel_sample.y);
+
+        // 3. 计算辐射度并累加到 Film
+        // (直接取消原有代码的注释即可)
+        assert(pixel_sample.x >= dx && pixel_sample.x <= dx + 1);
+        assert(pixel_sample.y >= dy && pixel_sample.y <= dy + 1);
+        const Vec3f &L = Li(scene, ray, sampler);
+        camera->getFilm()->commitSample(pixel_sample, L);
       }
     }
   }
 }
 
-Vec3f IntersectionTestIntegrator::Li(
-    ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const {
+Vec3f IntersectionTestIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
+                                     Sampler &sampler) const {
   Vec3f color(0.0);
+  Vec3f throughput(1.0); // 累积光通量 (用于处理有色玻璃，虽然这里全是白色的)
 
-  // Cast a ray until we hit a non-specular surface or miss
-  // Record whether we have found a diffuse surface
+  // 记录是否找到了非透明的漫反射表面
   bool diffuse_found = false;
   SurfaceInteraction interaction;
 
+  // 迭代追踪光线 (Trace the ray)
   for (int i = 0; i < max_depth; ++i) {
-    interaction      = SurfaceInteraction();
+    // 1. 相交测试
+    interaction = SurfaceInteraction();
     bool intersected = scene->intersect(ray, interaction);
 
-    // Perform RTTI to determine the type of the surface
+    if (!intersected) {
+      break; // 没打中任何东西，也就是打到了虚空(黑色背景)
+    }
+
+    // 2. 判断材质类型 (RTTI)
     bool is_ideal_diffuse =
         dynamic_cast<const IdealDiffusion *>(interaction.bsdf) != nullptr;
     bool is_perfect_refraction =
         dynamic_cast<const PerfectRefraction *>(interaction.bsdf) != nullptr;
 
-    // Set the outgoing direction
+    // 设置出射方向 (wo 指向光线来源)
     interaction.wo = -ray.direction;
 
-    if (!intersected) {
-      break;
-    }
-
+    // --- 情况 A: 遇到折射物体 (Transparent/Refractive) ---
     if (is_perfect_refraction) {
-      // We should follow the specular direction
-      // TODO(HW3): call the interaction.bsdf->sample to get the new direction
-      // and update the ray accordingly.
-      //
-      // Useful Functions:
-      // @see BSDF::sample
-      // @see SurfaceInteraction::spawnRay
-      //
-      // You should update ray = ... with the spawned ray
-      UNIMPLEMENTED;
+      Vec3f wi;
+      Float pdf;
+
+      // 采样 BSDF 获得新的方向 wi (折射或全反射)
+      // 注意: sample 函数会修改 interaction.wi
+      Vec3f f = interaction.bsdf->sample(interaction, sampler, &pdf);
+
+      // 更新 throughput (对于完美玻璃 f 通常是 1.0)
+      throughput *= f;
+
+      // 生成新光线: 原点在交点(处理了epsilon)，方向是新的 wi
+      ray = interaction.spawnRay(interaction.wi);
+
+      // 继续下一次循环 (Trace through)
       continue;
     }
 
+    // --- 情况 B: 遇到漫反射物体 (Solid/Non-transparent) ---
     if (is_ideal_diffuse) {
-      // We only consider diffuse surfaces for direct lighting
       diffuse_found = true;
-      break;
+      break; // 找到了着色点，跳出循环去计算光照
     }
 
-    // We simply omit any other types of surfaces
+    // 其他情况 (忽略)
     break;
   }
 
-  if (!diffuse_found) {
-    return color;
+  // 如果最终打到了漫反射物体，计算直接光照并乘以路径上的衰减(throughput)
+  if (diffuse_found) {
+    color = throughput * directLighting(scene, interaction);
   }
 
-  color = directLighting(scene, interaction);
   return color;
 }
 
@@ -130,8 +149,8 @@ Vec3f IntersectionTestIntegrator::directLighting(
     ref<Scene> scene, SurfaceInteraction &interaction) const {
   Vec3f color(0, 0, 0);
   Float dist_to_light = Norm(point_light_position - interaction.p);
-  Vec3f light_dir     = Normalize(point_light_position - interaction.p);
-  auto test_ray       = DifferentialRay(interaction.p, light_dir);
+  Vec3f light_dir = Normalize(point_light_position - interaction.p);
+  auto test_ray = DifferentialRay(interaction.p, light_dir);
 
   // TODO(HW3): Test for occlusion
   //
@@ -148,12 +167,23 @@ Vec3f IntersectionTestIntegrator::directLighting(
   //
   //    You can use iteraction.p to get the intersection position.
   //
-  UNIMPLEMENTED;
+  SurfaceInteraction shadow_interaction;
+  // 发射阴影光线进行相交测试
+  bool occluded = scene->intersect(test_ray, shadow_interaction);
+
+  // 如果有交点，且交点距离小于光源距离（减去一个小量防止精度误差），则说明被遮挡
+  if (occluded) {
+    float dist_shadow = Norm(shadow_interaction.p - interaction.p);
+    // ShadowEpsilon 是防止自我遮挡的容差，如果没有定义，可以用 1e-4 或 0.001
+    if (dist_shadow < dist_to_light - 1e-4f) {
+      return Vec3f(0.0f); // 被遮挡，贡献为 0（纯黑阴影）
+    }
+  }
 
   // Not occluded, compute the contribution using perfect diffuse diffuse model
   // Perform a quick and dirty check to determine whether the BSDF is ideal
   // diffuse by RTTI
-  const BSDF *bsdf      = interaction.bsdf;
+  const BSDF *bsdf = interaction.bsdf;
   bool is_ideal_diffuse = dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
 
   if (bsdf != nullptr && is_ideal_diffuse) {
@@ -166,11 +196,19 @@ Vec3f IntersectionTestIntegrator::directLighting(
 
     // The angle between light direction and surface normal
     Float cos_theta =
-        std::max(Dot(light_dir, interaction.normal), 0.0f);  // one-sided
+        std::max(Dot(light_dir, interaction.normal), 0.0f); // one-sided
 
     // You should assign the value to color
     // color = ...
-    UNIMPLEMENTED;
+
+    // 1. 计算 BSDF 值 (对于理想漫反射，通常是 albedo / PI)
+    interaction.wi = light_dir;
+    Vec3f f = bsdf->evaluate(interaction);
+
+    Vec3f intensity = point_light_flux * (1.0f / (4.0f * PI));
+
+    // 应用公式: Lo = f_r * I * cos_theta / r^2
+    color = f * intensity * cos_theta / (dist_to_light * dist_to_light);
   }
 
   return color;
@@ -187,14 +225,15 @@ void PathIntegrator::render(ref<Camera> camera, ref<Scene> scene) {
   UNIMPLEMENTED;
 }
 
-Vec3f PathIntegrator::Li(
-    ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const {
+Vec3f PathIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
+                         Sampler &sampler) const {
   // This is left as the next assignment
   UNIMPLEMENTED;
 }
 
-Vec3f PathIntegrator::directLighting(
-    ref<Scene> scene, SurfaceInteraction &interaction, Sampler &sampler) const {
+Vec3f PathIntegrator::directLighting(ref<Scene> scene,
+                                     SurfaceInteraction &interaction,
+                                     Sampler &sampler) const {
   // This is left as the next assignment
   UNIMPLEMENTED;
 }
@@ -215,7 +254,7 @@ IncrementalPathIntegrator::Li<PathImmediate>(ref<Scene> scene, DifferentialRay &
 
 // This is exactly a way to separate dec and def
 template <typename PathType>
-Vec3f IncrementalPathIntegrator::Li(  // NOLINT
+Vec3f IncrementalPathIntegrator::Li( // NOLINT
     ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const {
   // This is left as the next assignment
   UNIMPLEMENTED;
