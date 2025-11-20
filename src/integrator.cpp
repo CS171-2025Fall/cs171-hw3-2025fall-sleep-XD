@@ -147,11 +147,17 @@ Vec3f IntersectionTestIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
 
 Vec3f IntersectionTestIntegrator::directLighting(
     ref<Scene> scene, SurfaceInteraction &interaction) const {
-  Vec3f color(0, 0, 0);
-  Float dist_to_light = Norm(point_light_position - interaction.p);
-  Vec3f light_dir = Normalize(point_light_position - interaction.p);
-  auto test_ray = DifferentialRay(interaction.p, light_dir);
-
+  Vec3f total_color(0, 0, 0);
+  struct SimpleLight {
+    Vec3f position;
+    Vec3f flux;
+  };
+  std::vector<SimpleLight> lights;
+  lights.push_back({point_light_position, point_light_flux});
+  // 在左侧添加一个红色的灯
+  // lights.push_back({Vec3f(-0.5f, 1.5f, 0.0f), Vec3f(50.0f, 0.0f, 0.0f)});
+  // 在右侧添加一个蓝色的灯
+  // lights.push_back({Vec3f(2.0f, 3.0f, 0.0f), Vec3f(0.0f, 0.0f, 50.0f)});
   // TODO(HW3): Test for occlusion
   //
   // You should test if there is any intersection between interaction.p and
@@ -167,51 +173,48 @@ Vec3f IntersectionTestIntegrator::directLighting(
   //
   //    You can use iteraction.p to get the intersection position.
   //
-  SurfaceInteraction shadow_interaction;
-  // 发射阴影光线进行相交测试
-  bool occluded = scene->intersect(test_ray, shadow_interaction);
+  for (const auto &light : lights) {
 
-  // 如果有交点，且交点距离小于光源距离（减去一个小量防止精度误差），则说明被遮挡
-  if (occluded) {
-    float dist_shadow = Norm(shadow_interaction.p - interaction.p);
-    // ShadowEpsilon 是防止自我遮挡的容差，如果没有定义，可以用 1e-4 或 0.001
-    if (dist_shadow < dist_to_light - 1e-4f) {
-      return Vec3f(0.0f); // 被遮挡，贡献为 0（纯黑阴影）
+    // --- 以下逻辑全部针对当前 light 进行计算 ---
+
+    // 注意：这里使用的是 light.position 而不是 point_light_position
+    Float dist_to_light = Norm(light.position - interaction.p);
+    Vec3f light_dir = Normalize(light.position - interaction.p);
+    auto test_ray = DifferentialRay(interaction.p, light_dir);
+
+    // --- 阴影测试 ---
+    SurfaceInteraction shadow_interaction;
+    bool occluded = scene->intersect(test_ray, shadow_interaction);
+
+    if (occluded) {
+      float dist_shadow = Norm(shadow_interaction.p - interaction.p);
+      if (dist_shadow < dist_to_light - 1e-4f) {
+        // [修改点 4] 关键修改：如果被遮挡，只是跳过当前这个光源，不要 return！
+        continue;
+      }
+    }
+
+    // --- 计算光照贡献 ---
+    const BSDF *bsdf = interaction.bsdf;
+    bool is_ideal_diffuse =
+        dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
+
+    if (bsdf != nullptr && is_ideal_diffuse) {
+      Float cos_theta = std::max(Dot(light_dir, interaction.normal), 0.0f);
+
+      interaction.wi = light_dir;
+      Vec3f f = bsdf->evaluate(interaction);
+
+      // [修改点 5] 使用当前光源的 flux (light.flux)
+      Vec3f intensity = light.flux * (1.0f / (4.0f * PI));
+
+      // [修改点 6] 关键修改：使用 += 进行累加
+      total_color +=
+          f * intensity * cos_theta / (dist_to_light * dist_to_light);
     }
   }
 
-  // Not occluded, compute the contribution using perfect diffuse diffuse model
-  // Perform a quick and dirty check to determine whether the BSDF is ideal
-  // diffuse by RTTI
-  const BSDF *bsdf = interaction.bsdf;
-  bool is_ideal_diffuse = dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
-
-  if (bsdf != nullptr && is_ideal_diffuse) {
-    // TODO(HW3): Compute the contribution
-    //
-    // You can use bsdf->evaluate(interaction) * cos_theta to approximate the
-    // albedo. In this homework, we do not need to consider a
-    // radiometry-accurate model, so a simple phong-shading-like model is can be
-    // used to determine the value of color.
-
-    // The angle between light direction and surface normal
-    Float cos_theta =
-        std::max(Dot(light_dir, interaction.normal), 0.0f); // one-sided
-
-    // You should assign the value to color
-    // color = ...
-
-    // 1. 计算 BSDF 值 (对于理想漫反射，通常是 albedo / PI)
-    interaction.wi = light_dir;
-    Vec3f f = bsdf->evaluate(interaction);
-
-    Vec3f intensity = point_light_flux * (1.0f / (4.0f * PI));
-
-    // 应用公式: Lo = f_r * I * cos_theta / r^2
-    color = f * intensity * cos_theta / (dist_to_light * dist_to_light);
-  }
-
-  return color;
+  return total_color;
 }
 
 /* ===================================================================== *
