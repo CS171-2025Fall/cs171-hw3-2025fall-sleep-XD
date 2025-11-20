@@ -139,82 +139,81 @@ Vec3f IntersectionTestIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
 
   // 如果最终打到了漫反射物体，计算直接光照并乘以路径上的衰减(throughput)
   if (diffuse_found) {
-    color = throughput * directLighting(scene, interaction);
+    color = throughput * directLighting(scene, interaction, sampler);
   }
 
   return color;
 }
 
 Vec3f IntersectionTestIntegrator::directLighting(
-    ref<Scene> scene, SurfaceInteraction &interaction) const {
-  Vec3f total_color(0, 0, 0);
-  struct SimpleLight {
-    Vec3f position;
-    Vec3f flux;
-  };
-  std::vector<SimpleLight> lights;
-  lights.push_back({point_light_position, point_light_flux});
-  // 在左侧添加一个红色的灯
-  // lights.push_back({Vec3f(-0.5f, 1.5f, 0.0f), Vec3f(50.0f, 0.0f, 0.0f)});
-  // 在右侧添加一个蓝色的灯
-  // lights.push_back({Vec3f(2.0f, 3.0f, 0.0f), Vec3f(0.0f, 0.0f, 50.0f)});
-  // TODO(HW3): Test for occlusion
-  //
-  // You should test if there is any intersection between interaction.p and
-  // point_light_position using scene->intersect. If so, return an occluded
-  // color. (or Vec3f color(0, 0, 0) to be specific)
-  //
-  // You may find the following variables useful:
-  //
-  // @see bool Scene::intersect(const Ray &ray, SurfaceInteraction &interaction)
-  //    This function tests whether the ray intersects with any geometry in the
-  //    scene. And if so, it returns true and fills the interaction with the
-  //    intersection information.
-  //
-  //    You can use iteraction.p to get the intersection position.
-  //
-  for (const auto &light : lights) {
+    ref<Scene> scene, SurfaceInteraction &interaction, Sampler &sampler) const {
 
-    // --- 以下逻辑全部针对当前 light 进行计算 ---
+  Vec3f total_color(0.0f);
 
-    // 注意：这里使用的是 light.position 而不是 point_light_position
-    Float dist_to_light = Norm(light.position - interaction.p);
-    Vec3f light_dir = Normalize(light.position - interaction.p);
-    auto test_ray = DifferentialRay(interaction.p, light_dir);
+  // --- 1. 从 JSON 读取光源参数 ---
+  // [修改] 使用类成员变量读取位置
+  Vec3f light_center = point_light_position;
+
+  // 定义光源尺寸 (保持你想要的较小尺寸，阴影更锐利)
+  Vec2f light_size(0.5f, 0.5f);
+  Vec3f light_u = Vec3f(1, 0, 0) * light_size.x / 2.0f;
+  Vec3f light_v = Vec3f(0, 0, 1) * light_size.y / 2.0f;
+
+  Float area = light_size.x * light_size.y;
+
+  // [修改] 计算辐射亮度 Le
+  // 使用类成员 point_light_flux (来自JSON)
+  // 公式: Flux = Le * Area * PI  =>  Le = Flux / (Area * PI)
+  Vec3f Le = point_light_flux / (area * PI);
+
+  // 采样数
+  int shadow_samples = 256;
+
+  for (int i = 0; i < shadow_samples; ++i) {
+    Vec2f uv = sampler.get2D();
+    Vec3f light_sample_pos = light_center + (2.0f * uv.x - 1.0f) * light_u +
+                             (2.0f * uv.y - 1.0f) * light_v;
+
+    // --- [修复 Assert 报错的关键逻辑] ---
+    Vec3f diff = light_sample_pos - interaction.p;
+    Float dist_sq_real = Dot(diff, diff);
+
+    // 1. 如果距离太近，直接跳过，防止除零
+    if (dist_sq_real < 1e-6f)
+      continue;
+
+    // 2. 计算真实距离并归一化 (确保 light_dir 长度严格为 1)
+    Float dist = std::sqrt(dist_sq_real);
+    Vec3f light_dir = diff / dist;
+
+    // 3. 准备一个“安全距离”用于亮度衰减 (保留你的防噪点技巧)
+    Float dist_sq_clamped = std::max(dist_sq_real, 0.01f);
+
+    // --- 几何角度检查 ---
+    Float cos_theta_surf = Dot(interaction.normal, light_dir);
+    if (cos_theta_surf <= 0)
+      continue;
 
     // --- 阴影测试 ---
+    auto shadow_ray = DifferentialRay(interaction.p, light_dir);
     SurfaceInteraction shadow_interaction;
-    bool occluded = scene->intersect(test_ray, shadow_interaction);
+    bool occluded = scene->intersect(shadow_ray, shadow_interaction);
 
-    if (occluded) {
-      float dist_shadow = Norm(shadow_interaction.p - interaction.p);
-      if (dist_shadow < dist_to_light - 1e-4f) {
-        // [修改点 4] 关键修改：如果被遮挡，只是跳过当前这个光源，不要 return！
-        continue;
-      }
+    // 注意：遮挡判断用的是真实距离 dist
+    if (occluded && Norm(shadow_interaction.p - interaction.p) < dist - 1e-4f) {
+      continue;
     }
 
-    // --- 计算光照贡献 ---
-    const BSDF *bsdf = interaction.bsdf;
-    bool is_ideal_diffuse =
-        dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
+    // --- 累加贡献 ---
+    interaction.wi = light_dir;
+    Vec3f f_r = interaction.bsdf->evaluate(interaction);
 
-    if (bsdf != nullptr && is_ideal_diffuse) {
-      Float cos_theta = std::max(Dot(light_dir, interaction.normal), 0.0f);
-
-      interaction.wi = light_dir;
-      Vec3f f = bsdf->evaluate(interaction);
-
-      // [修改点 5] 使用当前光源的 flux (light.flux)
-      Vec3f intensity = light.flux * (1.0f / (4.0f * PI));
-
-      // [修改点 6] 关键修改：使用 += 进行累加
-      total_color +=
-          f * intensity * cos_theta / (dist_to_light * dist_to_light);
-    }
+    // 注意：分母使用 clamped 距离来防止噪点
+    Vec3f sample_contribution = Le * f_r * cos_theta_surf / dist_sq_clamped;
+    total_color += sample_contribution * area;
   }
 
-  return total_color;
+  return total_color / (Float)shadow_samples;
 }
 
 /* ===================================================================== *

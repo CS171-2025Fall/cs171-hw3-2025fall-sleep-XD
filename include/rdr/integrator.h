@@ -23,7 +23,7 @@ public:
   Integrator(const Properties &props) : ConfigurableObject(props) {}
 
   virtual void render(ref<Camera> camera, ref<Scene> scene) = 0;
-  std::string toString() const override                     = 0;
+  std::string toString() const override = 0;
 };
 
 /// @brief A simple & dirty integrator that only performs direct illumination
@@ -33,19 +33,19 @@ public:
 class IntersectionTestIntegrator : public Integrator {
 public:
   IntersectionTestIntegrator(const Properties &props) : Integrator(props) {
-    point_light_position = props.getProperty<Vec3f>(
-        "point_light_position", Vec3f(0.0F, 5.0F, 0.0F));
+    point_light_position = props.getProperty<Vec3f>("point_light_position",
+                                                    Vec3f(0.0F, 5.0F, 0.0F));
     point_light_flux =
         props.getProperty<Vec3f>("point_light_flux", Vec3f(1.0F, 1.0F, 1.0F));
 
     max_depth = props.getProperty<int>("max_depth", 16);
-    spp       = props.getProperty<int>("spp", 8);
+    spp = props.getProperty<int>("spp", 8);
   }
 
   void render(ref<Camera> camera, ref<Scene> scene) override;
 
   /// @see Integrator::Li
-  Vec3f Li(  // NOLINT
+  Vec3f Li( // NOLINT
       ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const;
 
   std::string toString() const override {
@@ -59,7 +59,8 @@ public:
   }
 
   /// @brief Compute direct lighting at the interaction point
-  Vec3f directLighting(ref<Scene> scene, SurfaceInteraction &interaction) const;
+  Vec3f directLighting(ref<Scene> scene, SurfaceInteraction &interaction,
+                       Sampler &sampler) const;
 
 protected:
   /// The position of the point light
@@ -75,8 +76,7 @@ protected:
 class PathIntegrator : public Integrator {
 public:
   PathIntegrator(const Properties &props)
-      : Integrator(props),
-        max_depth(props.getProperty<int>("max_depth", 12)),
+      : Integrator(props), max_depth(props.getProperty<int>("max_depth", 12)),
         spp(props.getProperty<int>("spp", 32)) {}
 
   /// @see Integrator::render
@@ -86,7 +86,7 @@ public:
    * @brief The core function of path tracing. Perform Monte Carlo integration
    * given a ray, estimate the radiance as definition.
    */
-  virtual Vec3f Li(  // NOLINT
+  virtual Vec3f Li( // NOLINT
       ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const;
 
   std::string toString() const override {
@@ -99,7 +99,7 @@ public:
 
 protected:
   Vec3f directLighting(ref<Scene> scene, SurfaceInteraction &interaction,
-      Sampler &sampler) const;
+                       Sampler &sampler) const;
 
   int max_depth, spp;
 };
@@ -119,15 +119,15 @@ public:
    * - EMultipleImportanceSampling: Perform MIS
    */
   enum class IntegratorProfile {
-    ERandomWalk                 = 0,
-    ENextEventEstimation        = 1,
+    ERandomWalk = 0,
+    ENextEventEstimation = 1,
     EMultipleImportanceSampling = 2,
   };
 
   // Another setting for Integrator to promote *performance* for debugging
   enum class EstimatorProfile {
-    EImmediateEstimate = 0,  // for performance
-    EDeferredEstimate  = 1,  // for debug
+    EImmediateEstimate = 0, // for performance
+    EDeferredEstimate = 1,  // for debug
   };
 
   IncrementalPathIntegrator(const Properties &props)
@@ -152,23 +152,23 @@ public:
   Vec3f Li(ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const;
 
   /// @see Integrator::Li
-  Vec3f Li(
-      ref<Scene> scene, DifferentialRay &ray, Sampler &sampler) const override {
+  Vec3f Li(ref<Scene> scene, DifferentialRay &ray,
+           Sampler &sampler) const override {
     return Li<PathImmediate>(scene, ray, sampler);
   }
 
   // ++ Required by Object
   std::string toString() const override {
-    return format(
-        "IncrementalPathIntegrator[\n"
-        "  max_depth              = {}\n"
-        "  spp                    = {}\n"
-        "  rr_threshold           = {}\n"
-        "  (randomWalk, NEE, MIS) = ({}, {}, {})\n",
-        "  (immediate, deferred)  = ({}, {})\n"
-        "]",
-        max_depth, spp, rr_threshold, randomWalk(), nextEventEstimation(),
-        multipleImportanceSampling(), !deferredEstimate(), deferredEstimate());
+    return format("IncrementalPathIntegrator[\n"
+                  "  max_depth              = {}\n"
+                  "  spp                    = {}\n"
+                  "  rr_threshold           = {}\n"
+                  "  (randomWalk, NEE, MIS) = ({}, {}, {})\n",
+                  "  (immediate, deferred)  = ({}, {})\n"
+                  "]",
+                  max_depth, spp, rr_threshold, randomWalk(),
+                  nextEventEstimation(), multipleImportanceSampling(),
+                  !deferredEstimate(), deferredEstimate());
   }
   // --
 
@@ -200,7 +200,7 @@ protected:
   }
 
   /// Heuristic function for MIS
-  RDR_FORCEINLINE Float miWeight(Float pdfA, Float pdfB) const {  // NOLINT
+  RDR_FORCEINLINE Float miWeight(Float pdfA, Float pdfB) const { // NOLINT
     pdfA *= pdfA;
     pdfB *= pdfB;
     return pdfA / (pdfA + pdfB);
