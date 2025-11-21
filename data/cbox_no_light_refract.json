@@ -63,6 +63,13 @@
         0.065,
         0.05
       ]
+    },
+    "my_wood_texture": {
+      "type": "image",
+      "path": "assets/cbox/wood.exr",
+      "tex_coordinate_generator": {
+        "type": "uvmapping2d"
+      }
     }
   },
   "materials": {
@@ -77,6 +84,10 @@
     "red_diffuse": {
       "type": "diffuse",
       "texture_name": "red"
+    },
+    "wood_material": {
+      "type": "diffuse",
+      "texture_name": "my_wood_texture"
     },
     "perfect_refraction": {
       "type": "refraction",
@@ -97,7 +108,7 @@
     {
       "type": "mesh",
       "path": "assets/cbox/floor.obj",
-      "material_name": "grey_diffuse"
+      "material_name": "wood_material"
     },
     {
       "type": "mesh",

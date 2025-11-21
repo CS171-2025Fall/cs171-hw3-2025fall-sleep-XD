@@ -150,8 +150,6 @@ Vec3f IntersectionTestIntegrator::directLighting(
 
   Vec3f total_color(0.0f);
 
-  // --- 1. 从 JSON 读取光源参数 ---
-  // [修改] 使用类成员变量读取位置
   Vec3f light_center = point_light_position;
 
   // 定义光源尺寸 (保持你想要的较小尺寸，阴影更锐利)
@@ -161,9 +159,6 @@ Vec3f IntersectionTestIntegrator::directLighting(
 
   Float area = light_size.x * light_size.y;
 
-  // [修改] 计算辐射亮度 Le
-  // 使用类成员 point_light_flux (来自JSON)
-  // 公式: Flux = Le * Area * PI  =>  Le = Flux / (Area * PI)
   Vec3f Le = point_light_flux / (area * PI);
 
   // 采样数
@@ -174,41 +169,35 @@ Vec3f IntersectionTestIntegrator::directLighting(
     Vec3f light_sample_pos = light_center + (2.0f * uv.x - 1.0f) * light_u +
                              (2.0f * uv.y - 1.0f) * light_v;
 
-    // --- [修复 Assert 报错的关键逻辑] ---
     Vec3f diff = light_sample_pos - interaction.p;
     Float dist_sq_real = Dot(diff, diff);
 
-    // 1. 如果距离太近，直接跳过，防止除零
     if (dist_sq_real < 1e-6f)
       continue;
 
-    // 2. 计算真实距离并归一化 (确保 light_dir 长度严格为 1)
     Float dist = std::sqrt(dist_sq_real);
     Vec3f light_dir = diff / dist;
 
-    // 3. 准备一个“安全距离”用于亮度衰减 (保留你的防噪点技巧)
     Float dist_sq_clamped = std::max(dist_sq_real, 0.01f);
 
-    // --- 几何角度检查 ---
     Float cos_theta_surf = Dot(interaction.normal, light_dir);
     if (cos_theta_surf <= 0)
       continue;
 
-    // --- 阴影测试 ---
+    // 阴影测试
     auto shadow_ray = DifferentialRay(interaction.p, light_dir);
     SurfaceInteraction shadow_interaction;
     bool occluded = scene->intersect(shadow_ray, shadow_interaction);
 
-    // 注意：遮挡判断用的是真实距离 dist
     if (occluded && Norm(shadow_interaction.p - interaction.p) < dist - 1e-4f) {
       continue;
     }
 
-    // --- 累加贡献 ---
+    // 累加贡献
     interaction.wi = light_dir;
     Vec3f f_r = interaction.bsdf->evaluate(interaction);
 
-    // 注意：分母使用 clamped 距离来防止噪点
+    // 使用 clamped 距离来防止噪点
     Vec3f sample_contribution = Le * f_r * cos_theta_surf / dist_sq_clamped;
     total_color += sample_contribution * area;
   }

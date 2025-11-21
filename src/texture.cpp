@@ -7,8 +7,8 @@
 
 RDR_NAMESPACE_BEGIN
 
-Vec2f UVMapping2D::Map(
-    const SurfaceInteraction &interaction, Vec2f &dstdx, Vec2f &dstdy) const {
+Vec2f UVMapping2D::Map(const SurfaceInteraction &interaction, Vec2f &dstdx,
+                       Vec2f &dstdy) const {
   dstdx = scale * Vec2f(interaction.dudx, interaction.dvdx);
   dstdy = scale * Vec2f(interaction.dudy, interaction.dvdy);
   return scale * interaction.uv + delta;
@@ -16,9 +16,10 @@ Vec2f UVMapping2D::Map(
 
 ImageTexture::ImageTexture(const Properties &props) : Texture(props) {
   auto path = props.getProperty<std::string>("path");
-  path      = FileResolver::resolveToAbs(path);
+  path = FileResolver::resolveToAbs(path);
 
-  texmap = RDR_CREATE_CLASS(TexCoordinateGenerator,
+  texmap = RDR_CREATE_CLASS(
+      TexCoordinateGenerator,
       props.getProperty<Properties>("tex_coordinate_generator"));
 
   float *out;
