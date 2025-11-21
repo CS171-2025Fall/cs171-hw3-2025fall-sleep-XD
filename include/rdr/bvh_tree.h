@@ -184,8 +184,6 @@ typename BVHTree<_>::IndexType BVHTree<_>::build(int depth,
                  nodes.begin() + split, 
                  nodes.begin() + span_right,
                  [dim](const NodeType &a, const NodeType &b) {
-                     // 注意：这里假设 AABB 类有一个 getCenter() 方法
-                     // 如果你的 AABB 类使用其他名字（如 centroid()），请相应修改
                      return a.getAABB().getCenter()[dim] < b.getAABB().getCenter()[dim];
                  });
 

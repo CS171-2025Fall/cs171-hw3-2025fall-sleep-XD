@@ -81,7 +81,7 @@ void IntersectionTestIntegrator::render(ref<Camera> camera, ref<Scene> scene) {
 Vec3f IntersectionTestIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
                                      Sampler &sampler) const {
   Vec3f color(0.0);
-  Vec3f throughput(1.0); // 累积光通量 (用于处理有色玻璃，虽然这里全是白色的)
+  Vec3f throughput(1.0); // 累积光通量
 
   // 记录是否找到了非透明的漫反射表面
   bool diffuse_found = false;
@@ -125,7 +125,6 @@ Vec3f IntersectionTestIntegrator::Li(ref<Scene> scene, DifferentialRay &ray,
     break;
   }
 
-  // 如果最终打到了漫反射物体，计算直接光照并乘以路径上的衰减(throughput)
   if (diffuse_found) {
     color = throughput * directLighting(scene, interaction, sampler);
   }
@@ -138,7 +137,7 @@ Vec3f IntersectionTestIntegrator::directLighting(
 
   Vec3f total_color(0.0f);
 
-  // --- 1. 定义局部结构体 (带尺寸的区域光) ---
+  // 定义局部结构体
   struct ManualAreaLight {
     Vec3f center;
     Vec3f flux;
@@ -149,9 +148,8 @@ Vec3f IntersectionTestIntegrator::directLighting(
   std::vector<ManualAreaLight> lights;
 
   lights.push_back({
-      point_light_position, point_light_flux,
-      Vec2f(0.5f, 0.5f), // 手动指定尺寸，产生软阴影
-      Vec3f(0, -1, 0)    // 朝下
+      point_light_position, point_light_flux, Vec2f(0.5f, 0.5f),
+      Vec3f(0, -1, 0) // 朝下
   });
   // 第二个光源
   lights.push_back({

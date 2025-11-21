@@ -100,31 +100,23 @@ Vec3f PerfectRefraction::sample(SurfaceInteraction &interaction,
   // @see Refract for refraction calculation.
   // @see Reflect for reflection calculation.
 
-  // 1. 计算有效法线 n_eff
   // 如果是射出 (entering=false)，法线需要反转
   Vec3f n_eff = normal;
   if (!entering) {
     n_eff = -normal;
-    cos_theta_i = -cos_theta_i; // 此时 wo 与 -n 的夹角是锐角，cos 变正
+    cos_theta_i = -cos_theta_i;
   }
 
-  // 2. 计算折射所需的比值 eta_ratio
-  // 折射公式通常使用 (eta_i / eta_t)，正好是 eta_corrected 的倒数
   Float eta_ratio = 1.0F / eta_corrected;
 
-  // 3. 检查全内反射 (TIR)
-  // sin^2(theta_t) = ratio^2 * (1 - cos^2(theta_i))
   Float sin2_theta_i = std::max(0.0F, 1.0F - cos_theta_i * cos_theta_i);
   Float sin2_theta_t = eta_ratio * eta_ratio * sin2_theta_i;
 
   if (sin2_theta_t >= 1.0F) {
-    // 全内反射 (Total Internal Reflection)
-    // 公式: R = 2 * (N . V) * N - V
     interaction.wi = 2.0F * cos_theta_i * n_eff - interaction.wo;
   } else {
-    // 折射 (Refraction)
     Float cos_theta_t = std::sqrt(1.0F - sin2_theta_t);
-    // 公式: wt = -ratio * wo + (ratio * cos_i - cos_t) * n
+    // wt = -ratio * wo + (ratio * cos_i - cos_t) * n
     interaction.wi = (eta_ratio * cos_theta_i - cos_theta_t) * n_eff -
                      eta_ratio * interaction.wo;
   }

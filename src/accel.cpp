@@ -156,8 +156,6 @@ bool TriangleIntersect(Ray &ray, const uint32_t &triangle_index,
     return false;
   }
 
-  // We will reach here if there is an intersection
-
   CalculateTriangleDifferentials(interaction,
                                  {static_cast<Float>(1 - u - v),
                                   static_cast<Float>(u), static_cast<Float>(v)},

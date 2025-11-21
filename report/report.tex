@@ -25,8 +25,8 @@
 % Title portion
 \title{Assignment 1:\\ {Exploring OpenGL Programming}} 
 
-\author{Name: \quad \\ student number:\
-\\email: \quad \texttt{}}
+\author{Name:Jiaxing Wu \quad \\ student number:2023533160\
+\\email: wujx2023@shanghaitech.edu.cn\quad \texttt{}}
 
 % Document starts
 \begin{document}
@@ -35,8 +35,201 @@
 \vspace*{2 ex}
 
 \section{Introduction}
+This project presents a physically based ray tracer, encompassing the implementation of core components from ray-triangle/AABB intersections and BVH construction to advanced shading systems. Key features include PerfectRefraction material handling, BRDF-based direct lighting, and multiple light source support. Furthermore, rendering quality is notably improved through soft shadows for rectangular area lights and multi-sampling anti-aliasing techniques.
+
+\begin{itemize}
+    \item \textbf{[Must]} Compile the source code and configure the language server environment. [5\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement ray-triangle intersection functionality. [10\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement ray-AABB intersection functionality. [10\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement the BVH (Bounding Volume Hierarchy) construction. [25\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement the \texttt{IntersectionTestIntegrator} and \texttt{PerfectRefraction} material for basic ray tracing validation, handling refractive and solid surface interactions. [25\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement a direct lighting function with diffuse BRDF and shadow testing. [20\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Must]} Implement anti-aliasing via multi-ray sampling per pixel within a sub-pixel aperture. [5\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Optional]} Implement support for multiple light sources. [5\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Optional]} Implement rectangular area lights with soft shadow generation. [15\%] \hfill \textbf{[Finished]}
+    \item \textbf{[Optional]} Implement environment lighting via environment maps. [15\%]
+    \item \textbf{[Optional]} Implement texture mapping support. [15\%]
+    \item \textbf{[Optional]} Implement GPU-parallel BVH construction following the algorithm in Karras (2012). [30\%]
+\end{itemize}
 \section{Implementation Details}
+\subsection{Ray-Triangle Intersection}
+To implement efficient and robust ray-triangle intersection, we utilized the Möller-Trumbore intersection algorithm. This method computes the intersection point directly using barycentric coordinates without pre-computing the plane equation of the triangle, thus saving memory and computational overhead.
+
+Given a ray defined by origin $O$ and direction $D$, and a triangle defined by vertices $V_0, V_1, V_2$, the intersection point $P(t)$ satisfies the equation:
+\begin{equation}
+    O + tD = (1 - u - v)V_0 + uV_1 + vV_2
+\end{equation}
+where $t$ is the distance along the ray, and $(u, v)$ are the barycentric coordinates. This equation can be rearranged into a linear system:
+\begin{equation}
+    \begin{bmatrix} -D & E_1 & E_2 \end{bmatrix} \begin{bmatrix} t \\ u \\ v \end{bmatrix} = S
+\end{equation}
+where $E_1 = V_1 - V_0$, $E_2 = V_2 - V_0$, and $S = O - V_0$. 
+
+In our implementation, we solve this system using Cramer's rule. The variables correspond to the source code as follows:
+\begin{itemize}
+    \item The edge vectors are computed as \texttt{edge1} ($E_1$) and \texttt{edge2} ($E_2$).
+    \item The determinant is computed via the scalar triple product using the auxiliary vector $h = D \times E_2$.
+    \item The barycentric coordinate $u$ is calculated as $f (S \cdot h)$, where $f$ is the inverse determinant.
+    \item The auxiliary vector $q = S \times E_1$ is used to compute $v$ and $t$.
+\end{itemize}
+
+To ensure numerical stability, we perform all intermediate calculations using high-precision floating-point types (\texttt{Double}) instead of standard \texttt{Float}. The intersection is considered valid only if the following conditions are met:
+\begin{equation}
+    u \ge 0, \quad v \ge 0, \quad u + v \le 1, \quad t_{min} \le t \le t_{max}
+\end{equation}
+
+If a valid intersection is found, the ray's maximum traversal time ($t_{max}$) is updated to $t$, and the surface interaction details (including surface differentials) are populated for shading calculations.
+\subsection{Ray-AABB Intersection}
+The ray-Axis Aligned Bounding Box (AABB) intersection test is a critical component for traversing the BVH acceleration structure efficiently. We implemented the standard "Slab Method," which treats the AABB as the intersection volume of three pairs of parallel planes (slabs) orthogonal to the world coordinate axes ($x, y, z$).
+
+For a ray defined by $R(t) = O + tD$, we calculate the intersection distances $t$ for each pair of planes. To optimize performance, we precompute the inverse direction vector, \texttt{inv\_dir}, allowing us to replace division with multiplication. Our implementation handles numerical instability where the ray direction component is near zero ($< 10^{-8}$) by assigning a large finite value to the inverse.
+
+For each axis $i$, the intersection times $t_0$ and $t_1$ with the slab boundaries ($B_{min}$ and $B_{max}$) are computed as:
+\begin{equation}
+    t_{0,i} = (B_{min,i} - O_i) \cdot D^{-1}_i, \quad t_{1,i} = (B_{max,i} - O_i) \cdot D^{-1}_i
+\end{equation}
+
+Since the ray direction can be negative, we ensure correct ordering for the "near" (entry) and "far" (exit) planes:
+\begin{equation}
+    t_{near, i} = \min(t_{0,i}, t_{1,i}), \quad t_{far, i} = \max(t_{0,i}, t_{1,i})
+\end{equation}
+
+The ray intersects the AABB only if the ray segment overlaps with all three slabs simultaneously. This corresponds to finding the maximum of the entry times and the minimum of the exit times:
+\begin{equation}
+    t_{enter} = \max_i(t_{near, i}), \quad t_{exit} = \min_i(t_{far, i})
+\end{equation}
+
+A valid intersection is confirmed if $t_{enter} \le t_{exit}$ and $t_{exit} \ge 0$. If these conditions are met, the function updates the output parameters \texttt{t\_in} and \texttt{t\_out} with $t_{enter}$ and $t_{exit}$ respectively.
+\subsection{BVH Construction}
+
+The Bounding Volume Hierarchy (BVH) is constructed using a top-down recursive approach implemented in the \texttt{build} function. The construction process involves partitioning the primitives into a binary tree structure to accelerate ray intersections.
+
+\textbf{Termination Criteria:}
+The recursion terminates, creating a leaf node, when either of the following conditions is met:
+\begin{itemize}
+    \item The number of primitives in the current node is small enough (specifically, $\le 1$).
+    \item The recursion depth reaches a predefined threshold (\texttt{CUTOFF\_DEPTH} $= 22$).
+\end{itemize}
+
+\textbf{Splitting Strategy (Median Heuristic):}
+For internal nodes, we employ the "Object Median" splitting strategy to ensure a balanced tree. The process consists of three steps:
+\begin{enumerate}
+    \item \textbf{Axis Selection:} We select the splitting axis ($x, y,$ or $z$) corresponding to the largest extent of the current node's bounding box. This minimizes the overlap probability of child nodes.
+    \item \textbf{Partitioning:} Instead of fully sorting the primitives, which would cost $O(N \log N)$, we utilize the C++ standard library function \texttt{std::nth\_element}. This algorithm achieves $O(N)$ average complexity to partition the primitive array. It rearranges elements such that the primitive at the median index is in its sorted position, and all elements to its left have centroid coordinates smaller than the median along the chosen axis.
+    \item \textbf{Recursion:} The primitives are split into left and right subsets at the median index. The \texttt{build} function is then called recursively for both children.
+\end{enumerate}
+
+Each node's AABB is computed as the union of the AABBs of all primitives it contains, ensuring tight bounds for efficient culling during traversal.
+\subsection{Intersection Test Integrator Implementation}
+
+The \texttt{IntersectionTestIntegrator} serves as the primary rendering engine for this assignment. Our implementation extends basic ray casting by incorporating recursive path tracing to correctly simulate light transport through refractive materials.
+
+\subsubsection{Ray Generation and Anti-Aliasing}
+To address aliasing artifacts along geometric edges, we implement a multi-sampling strategy within the \texttt{render} method. For each pixel $(x, y)$, we generate $N$ samples (defined by \texttt{spp}).
+\begin{equation}
+    P_{sample} = (x + \xi_x, y + \xi_y)
+\end{equation}
+where $(\xi_x, \xi_y)$ are stratified random offsets provided by the \texttt{Sampler}. The \texttt{Camera::generateDifferentialRay} method converts these film-space coordinates into world-space rays. The final pixel color is the average radiance accumulated from all samples, effectively integrating the signal over the pixel filter footprint.
+
+\subsubsection{Recursive Traversal and Material Handling}
+The radiance computation is handled in the \texttt{Li} function. Unlike a simple ray caster, our implementation supports hybrid material interactions via a loop bounded by \texttt{max\_depth}:
+\begin{itemize}
+    \item \textbf{Scene Intersection:} We utilize \texttt{scene->intersect()} to query the BVH acceleration structure for the closest intersection.
+    \item \textbf{Refractive Surfaces:} If the ray intersects a \texttt{PerfectRefraction} material, we do not compute direct lighting immediately. Instead, we update the path throughput vector to account for transmission color, generate a new ray direction (refraction/reflection) via \texttt{bsdf->sample()}, and continue the recursion.
+    \item \textbf{Diffuse Surfaces:} Upon hitting an \texttt{IdealDiffusion} surface, we flag the interaction as valid for lighting, terminate the recursion, and invoke the direct illumination logic.
+\end{itemize}
+\subsection{Integration with Refractive Materials}
+
+To support realistic rendering of transparent objects (e.g., glass, water), we implemented the \texttt{PerfectRefraction} material model and integrated a recursive tracing logic within the integrator. This allows light rays to pass through dielectric interfaces according to physical laws before interacting with diffuse surfaces.
+
+\subsubsection{Refraction and Total Internal Reflection}
+The core logic is implemented in \texttt{PerfectRefraction::sample}. Given an incident view direction $\omega_o$ and surface normal $N$, we compute the transmitted direction $\omega_i$ based on Snell's Law: $\eta_i \sin \theta_i = \eta_t \sin \theta_t$.
+
+The implementation handles three critical cases:
+\begin{enumerate}
+    \item \textbf{Interface Orientation:} We determine if the ray is entering or exiting the medium by checking $\omega_o \cdot N$. If exiting ($\omega_o \cdot N < 0$), the normal is flipped, and the relative index of refraction is inverted ($\eta_{ratio} = \eta / 1.0$).
+    \item \textbf{Total Internal Reflection (TIR):} When light travels from a denser to a rarer medium, we check the critical angle condition: $\sin^2 \theta_t = \eta_{ratio}^2 (1 - \cos^2 \theta_i) > 1$. If this condition is met, the ray undergoes total internal reflection, and the direction is computed as a perfect specular reflection: $\omega_i = 2(\omega_o \cdot N)N - \omega_o$.
+    \item \textbf{Refraction:} If TIR does not occur, the refracted direction is computed as:
+    \begin{equation}
+        \omega_i = (\eta_{ratio} \cos \theta_i - \cos \theta_t) N - \eta_{ratio} \omega_o
+    \end{equation}
+    where $\cos \theta_t = \sqrt{1 - \sin^2 \theta_t}$.
+\end{enumerate}
+
+\subsubsection{Recursive Ray Tracing Logic}
+In the \texttt{IntersectionTestIntegrator::Li} method, we modified the ray tracing loop to handle nested transparent objects. Instead of returning color immediately upon intersection:
+\begin{itemize}
+    \item When a ray hits a \texttt{PerfectRefraction} surface, we sample the BSDF to generate the new direction $\omega_i$.
+    \item The ray's throughput (attenuation factor) is updated by the BSDF value (typically 1.0 for perfect glass).
+    \item A new ray is spawned from the intersection point in the direction $\omega_i$, and the loop continues (`continue`).
+    \item The recursion terminates only when a non-transparent (solid) surface (e.g., \texttt{IdealDiffusion}) is hit, or the maximum depth is reached. At that point, shadow rays are cast to compute direct illumination, which is then modulated by the accumulated throughput.
+\end{itemize}
+\subsection{Support for Multiple Light Sources}
+
+To enhance the realism of the scene, we extended the renderer to support multiple light sources. This implementation is based on the principle of superposition in physics, which states that the total radiance leaving a point is the sum of the reflected radiance contributions from all individual light sources.
+
+\subsubsection{Data Structure and Configuration}
+We replaced the single hard-coded light source with a resizable container of light structures to manage the scene's lighting configuration. Each light source is defined by its geometric properties (center, size, normal) and radiometric properties (flux). This design allows for an arbitrary number of lights to be added to the scene flexibly.
+
+\subsubsection{Accumulation Loop}
+In the \texttt{directLighting} function, the total direct illumination is computed by iterating over all registered light sources:
+
+\begin{equation}
+    L_{total}(P, \omega_o) = \sum_{k=1}^{N_{lights}} L_{direct}^{(k)}(P, \omega_o)
+\end{equation}
+
+For each light source $k$, the integrator performs an independent Monte Carlo estimation:
+\begin{itemize}
+    \item \textbf{Independent Sampling:} We generate a unique set of random samples on the surface of light $k$.
+    \item \textbf{Independent Visibility:} Shadow rays are cast specifically towards light $k$ to determine if it is occluded. Note that a point can be in the shadow of one light while being illuminated by another.
+    \item \textbf{Accumulation:} The valid contribution from light $k$ (after visibility checks and BRDF evaluation) is added to the \texttt{total\_color} accumulator.
+\end{itemize}
+
+This approach allows for complex lighting setups, such as the combination of key lights and fill lights, creating richer shading and depth in the final image.
+\subsection{Rectangular Area Lights and Soft Shadows}
+
+To achieve realistic shading with soft penumbras (soft shadows), we replaced ideal point lights with rectangular area lights. While point lights produce infinitely sharp shadows, area lights simulate physical light sources with measurable surface area.
+
+\subsubsection{Light Definition and Sampling}
+The area lights are defined by a center position $C$, a normal vector, a physical size ($W \times H$), and radiant flux $\Phi$. In the \texttt{directLighting} function, we construct a local coordinate system with tangent vectors $\mathbf{U}$ and $\mathbf{V}$ aligned with the light's surface.
+
+For each shading point, we approximate the direct illumination integral using Monte Carlo integration. We generate $N_{shadow}$ samples (set to 128 in our code) distributed uniformly over the light's surface:
+\begin{equation}
+    P_{light} = C + (2\xi_1 - 1)\frac{W}{2}\mathbf{U} + (2\xi_2 - 1)\frac{H}{2}\mathbf{V}
+\end{equation}
+where $\xi_1, \xi_2 \in [0, 1)$ are uniform random variables.
+
+\subsubsection{Visibility and Attenuation}
+For each sample $P_{light}$, we perform the following steps:
+\begin{enumerate}
+    \item \textbf{Geometric Term:} We compute the distance $d$ and direction $\omega_i$ from the shading point $p$ to the light sample.
+    \item \textbf{Shadow Ray Casting:} A shadow ray is cast towards $P_{light}$. To prevent self-intersection (shadow acne), the ray origin is perturbed by $\epsilon$ along the normal. If the ray is occluded before reaching the light distance (minus tolerance), the sample contributes zero radiance.
+    \item \textbf{Radiance Accumulation:} Unoccluded samples contribute to the total radiance according to the rendering equation:
+    \begin{equation}
+        L_{dir} \approx \frac{1}{N_{shadow}} \sum_{k=1}^{N_{shadow}} \frac{L_e \cdot f_r \cdot (\omega_i \cdot n) \cdot (\omega_{light} \cdot n_{light}) \cdot A}{d^2}
+    \end{equation}
+\end{enumerate}
+This statistical averaging of visibility terms results in smooth gradients at shadow boundaries, creating the soft shadow effect.
 \section{Results}
+We present the rendering results of the Cornell Box scene to validate our implementation. The progression of features is shown in the following figures.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.3\textwidth]{must.png}
+    \caption{\textbf{Baseline Rendering.} This image demonstrates the result after implementing all mandatory requirements. It verifies the correctness of ray-triangle/AABB intersections, BVH construction, and the basic direct lighting integrator with hard shadows.}
+    \label{fig:must}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.3\textwidth]{soft.png}
+    \caption{\textbf{Soft Shadows and Textures.} We replaced the point light with a rectangular area light and applied texture mapping to the floor. Note the realistic penumbra (soft shadow) regions compared to the sharp shadows in Figure \ref{fig:must}, achieved via Monte Carlo sampling.}
+    \label{fig:soft}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.3\textwidth]{multiple.png}
+    \caption{\textbf{Multiple Light Sources.} This scene extends the previous setup by adding auxiliary light sources. The renderer correctly accumulates radiance from all lights, creating a more complex lighting environment with overlapping shadows.}
+    \label{fig:multiple}
+\end{figure}
 
 \end{document}
 
